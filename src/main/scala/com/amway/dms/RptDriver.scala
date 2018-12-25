@@ -6,7 +6,7 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
 class RptDriver(mode: Int, freq: Int, data_in: String, data_out: String) {
-  val query_type = if ( freq == 0) "month" else "quarter"
+  val query_type = if (freq == 0) "month" else "quarter"
 
   def init() = {
     val startTime = LocalDateTime.now().toString
@@ -29,14 +29,14 @@ class RptDriver(mode: Int, freq: Int, data_in: String, data_out: String) {
   def process(df: DataFrame) = {
     println(s"=== processing ${query_type}ly reports ...")
     val df1 = df.withColumn("TRX_DT", regexp_replace(col("TRX_DT"), "(\\s.+$)", ""))
-    val dfm = if ( freq == 0) df1.withColumn(query_type, month(to_date(col("TRX_DT"), "M/d/y")))
+    val dfm = if (freq == 0) df1.withColumn(query_type, month(to_date(col("TRX_DT"), "M/d/y")))
     else df1.withColumn(query_type, quarter(to_date(col("TRX_DT"), "M/d/y")))
     val dfma = dfm.na.fill(0, Seq(query_type))
       .groupBy(query_type, "TRX_ISO_CNTRY_CD", "DIST_ID", "BAL_TYPE_ID")
       .agg(expr("sum(bal_amt) as TOTAL"))
-      .withColumn("TOTAL", regexp_replace(format_number(col("TOTAL"),2), ",", ""))
+      .withColumn("TOTAL", regexp_replace(format_number(col("TOTAL"), 2), ",", ""))
       .orderBy(query_type, "TRX_ISO_CNTRY_CD", "BAL_TYPE_ID", "DIST_ID", "TOTAL")
-//    dfma.show()
+    //    dfma.show()
     val freq_list = dfma.select(query_type).distinct().rdd.map(r => r(0).toString).collect()
 
     freq_list.foreach(m => println(s"=== $query_type $m"))
@@ -44,8 +44,8 @@ class RptDriver(mode: Int, freq: Int, data_in: String, data_out: String) {
   }
 
   def filterByFreq(df: DataFrame, mq: String): Unit = {
-    val m_df = df.filter( query_type + " == " + mq).drop(query_type)
-    writeToCsv(m_df, query_type + "-" + String.format("%2s", mq).replace(' ','0'))
+    val m_df = df.filter(query_type + " == " + mq).drop(query_type)
+    writeToCsv(m_df, query_type + "-" + String.format("%2s", mq).replace(' ', '0'))
   }
 
   def writeToCsv(df: DataFrame, prefix: String) = {
@@ -59,4 +59,12 @@ class RptDriver(mode: Int, freq: Int, data_in: String, data_out: String) {
       .mode("overwrite")
       .save(fn)
   }
+
+  def rangex(str: String): Seq[Int] =
+    str split ",\\s*" flatMap { (s) =>
+      val r = """(-?\d+)(?:-(-?\d+))?""".r
+      val r(a, b) = s
+      if (b == null) Seq(a.toInt) else a.toInt to b.toInt
+    }
+
 }
