@@ -56,42 +56,48 @@ object Utils {
       if (b == null) Seq(a.toInt) else a.toInt to b.toInt
     }
 
-  private def mq(): (Int, Int) = {
+  // return a tuple like (2018M09, 2018Q3)
+  def mq(): (String, String) = {
     val cal_month = Calendar.getInstance().get(Calendar.MONTH)
-    val last_month = if (cal_month == 0) 12 else cal_month
+    val cal_year = Calendar.getInstance().get(Calendar.YEAR)
+
+    val last_month = if (cal_month == 0) (cal_year - 1).toString + "M12" else (cal_year).toString + "M" + f"$cal_month%02d"
     val curr_month = cal_month + 1
     val curr_q = if (curr_month % 3 == 0) curr_month / 3 else curr_month / 3 + 1
-    val last_q = if (curr_q == 1) 4 else curr_q - 1
+    val last_q = if (curr_q == 1) (cal_year - 1).toString + "Q4" else cal_year.toString + "Q" + (curr_q - 1).toString
 
     (last_month, last_q)
   }
 
-  def getRange(range: Any, mode: String, freq: String): Seq[Int] = {
+  def getRange(range: Any, mode: String, freq: String): Seq[String] = {
     val (last_month, last_q) = mq
-    val range_seq = range match {
-      case None =>
-        mode match {
-          case Constant.LAST => { // previous month or quarter
-            freq match {
-              case Constant.MM => Seq(last_month)
-              case Constant.QQ => Seq(last_q)
-            }
-          }
-          case Constant.ALL => { // up to previous month or quarter
-            freq match {
-              case Constant.MM => 1 to last_month
-              case Constant.QQ => 1 to last_q
-            }
-          }
-        }
-      case _ => {
-        val r = rangex(range.toString)
-        freq match {
-          case Constant.MM => r.toSet.intersect((1 to 12).toSet).toSeq
-          case Constant.QQ => r.toSet.intersect((1 to 4).toSet).toSeq
-        }
-      }
-    }
-    range_seq.sorted
+
+     Seq[String]()
+
+//    val range_seq = range match {
+//      case None =>
+//        mode match {
+//          case Constant.LAST => { // previous month or quarter
+//            freq match {
+//              case Constant.MM => Seq(last_month)
+//              case Constant.QQ => Seq(last_q)
+//            }
+//          }
+//          case Constant.ALL => { // up to previous month or quarter
+//            freq match {
+//              case Constant.MM => 1 to 12
+//              case Constant.QQ => 1 to 4
+//            }
+//          }
+//        }
+//      case _ => {
+//        val r = rangex(range.toString)
+//        freq match {
+//          case Constant.MM => r.toSet.intersect((1 to 12).toSet).toSeq
+//          case Constant.QQ => r.toSet.intersect((1 to 4).toSet).toSeq
+//        }
+//      }
+//    }
+//    range_seq.toString
   }
 }
