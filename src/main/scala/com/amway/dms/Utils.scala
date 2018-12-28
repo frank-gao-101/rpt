@@ -5,15 +5,6 @@ import java.util.Calendar
 object Utils {
 
   def parse(args: Array[String]): (Map[Symbol, Any], List[Symbol]) = {
-    val usage =
-      """
-    Usage: <program> --input <full_path_file>
-            --output <output_dir>
-            --mode <last/uptolast>
-            --freq <month/quarter>
-            [--range <1,2,3-7,8-10,11> ]
-            [--report-gen-prefix DMS_ ]
-      """
     val map: Map[Symbol, Any] = Map()
     val list: List[Symbol] = List()
 
@@ -21,40 +12,124 @@ object Utils {
       args match {
         case Nil => (map, list)
         case arg :: value :: tail if (arg.startsWith("--") && !value.startsWith("--")) =>
-                      _parse(map ++ Map(Symbol(arg.substring(2)) -> value), list, tail)
-    //    case arg :: tail if (arg.startsWith("--")) => _parse(map ++ Map(Symbol(arg.substring(2)) -> true), list, tail)
+          _parse(map ++ Map(Symbol(arg.substring(2)) -> value), list, tail)
+        //    case arg :: tail if (arg.startsWith("--")) => _parse(map ++ Map(Symbol(arg.substring(2)) -> true), list, tail)
         case opt :: tail => _parse(map, list :+ Symbol(opt), tail)
       }
     }
 
     val (opt_map, args_list) = _parse(map, list, args.toList)
 
-//    println(opt_map)
-//    println(args_list)
-    if (opt_map.size < 4 ||
-      !opt_map.contains('input) ||
-      !opt_map.contains('output) ||
-      !opt_map.contains('mode) ||
-      !Seq(Constant.LAST, Constant.ALL).contains(opt_map('mode).toString.toLowerCase) ||
-      !opt_map.contains('freq) ||
-      !Seq(Constant.MM, Constant.QQ).contains(opt_map('freq).toString.toLowerCase) ||
-      (opt_map.contains('range) &&
-      ("""^[0-9]([0-9,\-,\,]*[0-9])*$""".r).findFirstIn(opt_map('range).toString) == None) ||
-      (opt_map.contains(Symbol("report-gen-prefix")) &&
-        opt_map(Symbol("report-gen-prefix")) == None)
-    ) {
-      println(usage)
-      sys.exit(1)
-    }
+    //    println(opt_map)
+    //    println(args_list)
+
     (opt_map, args_list)
   }
 
-  private def rangex(str: String): Seq[Int] =
-    str split ",\\s*" flatMap { (s) =>
-      val r = """(-?\d+)(?:-(-?\d+))?""".r
-      val r(a, b) = s
-      if (b == null) Seq(a.toInt) else a.toInt to b.toInt
+  def verifyArgs(opt_map: Map[Symbol, Any]) : (String,  //input
+    String, //output
+    Option[Any], // mode
+    Option[Any], // freq
+    Seq[String], // range
+    Option[Any] // prefix
+    ) = {
+    val usage =
+      """
+        | Usage: <program> --input <full_path_file>
+        |     --output <output_dir>
+        |     --mode <last/upto/all>
+        |     --freq <month/quarter>
+        |     [--range <2017Q1, 2017M01-2018M12> ]
+        |     [--report-gen-prefix DMS ]
+      """
+
+    if (!opt_map.contains('input) || !opt_map.contains('output)) {
+      println(Constant.ERR_INPUT_OUTPUT_MISSING);
+      println(usage)
+      sys.exit(1)
     }
+
+    if (!opt_map.contains('range) && !opt_map.contains('mode) ||
+      !Seq(Constant.LAST, Constant.ALL, Constant.UPTO).contains(opt_map('mode).toString.toLowerCase)) {
+      println(Constant.ERR_INVALID_MODE);
+      println(usage)
+      sys.exit(1)
+    }
+
+    if (!opt_map.contains('range) && !opt_map.contains('freq) ||
+      !Seq(Constant.MM, Constant.QQ).contains(opt_map('freq).toString.toLowerCase)) {
+      println(Constant.ERR_INVALID_FREQ);
+      println(usage)
+      sys.exit(1)
+    }
+
+    (opt_map('input).toString,
+      opt_map('output).toString,
+      opt_map.get('mode),
+      opt_map.get('freq),
+      rangexpr(opt_map.get('range)),
+      opt_map.get(Symbol("report-gen-prefix")).orElse(Some(Constant.PREFIX))
+
+    )
+  }
+
+  /*
+     a:  the entire left part of the range
+     b:  year of the left
+     c:  delimiter
+     d:  month of the left
+     e:  the entire right part of the range
+     f:  year of the right
+     g:  month of the right
+   */
+  def rangexpr(str: Option[Any]): Seq[String] =
+    if (str.isEmpty) Seq() else {
+       str.get.toString split ",\\s*" flatMap { (s) =>
+        val r = """((\d{4})([M|Q])(\d{1,2}))(?:-((\d{4})\3(\d{1,2})))?""".r
+        s match {
+          case r(a, b, c, d, e, f, g) if e == null =>
+            if (validRange(c, d)) Seq(a) else Seq()
+          case r(a, b, c, d, e, f, g) =>
+            if (validRange(c, d) && validRange(c, g)) expandRange(b, c, d, f, g) else Seq()
+          case _ => Seq()
+        }
+      }
+    }
+
+  def expandRange(y1: String, delim: String, m1: String, y2: String, m2: String): Seq[String] = {
+    val carry = delim match {
+      case Constant.M => 12
+      case Constant.Q => 4
+    }
+
+    val diff = (y2.toInt - y1.toInt) * carry + (m2.toInt - m1.toInt) + 1
+
+    if (diff < 1) Seq() else genRangeList(y1.toInt, m1.toInt, carry, diff, delim)
+  }
+
+  def genRangeList(y: Int, m: Int, carry: Int, diff: Int, delim: String): Seq[String] = {
+    val init_seq = Seq[(Int, Int)]()
+
+    def gen(y: Int, m: Int, n: Int, s: Seq[(Int, Int)]): Seq[(Int, Int)] = {
+      n match {
+        case 0 => s :+ (y, m)
+        case _ if m > carry => gen(y + 1, m - carry, n - 1, s)
+        case _ => gen(y, m + 1, n - 1, s :+ (y, m))
+      }
+    }
+
+    val seq_tuple = gen(y, m, diff, init_seq)
+    seq_tuple.toList.map(m => (m._1).toString + delim + (if (delim == Constant.M) f"${m._2}%02d" else m._2))
+  }
+
+  def validRange(unit: String, num_str: String): Boolean = {
+    val num = num_str.toInt
+    unit match {
+      case Constant.M if num > 0 && num < 13 => true
+      case Constant.Q if num > 0 && num < 5 => true
+      case _ => false
+    }
+  }
 
   // return a tuple like (2018M09, 2018Q3)
   def mq(): (String, String) = {
@@ -69,35 +144,4 @@ object Utils {
     (last_month, last_q)
   }
 
-  def getRange(range: Any, mode: String, freq: String): Seq[String] = {
-    val (last_month, last_q) = mq
-
-     Seq[String]()
-
-//    val range_seq = range match {
-//      case None =>
-//        mode match {
-//          case Constant.LAST => { // previous month or quarter
-//            freq match {
-//              case Constant.MM => Seq(last_month)
-//              case Constant.QQ => Seq(last_q)
-//            }
-//          }
-//          case Constant.ALL => { // up to previous month or quarter
-//            freq match {
-//              case Constant.MM => 1 to 12
-//              case Constant.QQ => 1 to 4
-//            }
-//          }
-//        }
-//      case _ => {
-//        val r = rangex(range.toString)
-//        freq match {
-//          case Constant.MM => r.toSet.intersect((1 to 12).toSet).toSeq
-//          case Constant.QQ => r.toSet.intersect((1 to 4).toSet).toSeq
-//        }
-//      }
-//    }
-//    range_seq.toString
-  }
 }

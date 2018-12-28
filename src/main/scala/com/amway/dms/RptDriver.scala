@@ -67,7 +67,7 @@ class RptDriver(data_in: String, data_out: String, mode: String, freq: String, r
     }
 
     val dfmb = aggByQueryType(dfma.filter(query_filter).drop(query_type))
-    PreSink(dfmb, morq )
+    PreSink(dfmb, morq)
     // at this point, prev/all months or prev/all quarters data has been aggregated.
 
 
