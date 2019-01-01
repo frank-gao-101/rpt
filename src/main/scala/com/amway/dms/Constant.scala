@@ -9,6 +9,8 @@ object Constant {
   val PREFIX = "DMS"
   val M = "M"
   val Q = "Q"
+  val RANGE_DASH = "-"
+  val RANGE_DOTS = ".."
 
   val ERR_INPUT_OUTPUT_MISSING = "***  Input or Output is missing"
   val ERR_INVALID_RANGE = "***  Invalid range. Effective Range is Empty"

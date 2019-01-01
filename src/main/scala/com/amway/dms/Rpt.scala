@@ -10,12 +10,13 @@ object Rpt {
      mode,
      freq,
      range,
+     hasRange,
      prefix
     ) = Utils.verifyArgs(opt_map)
 
     //    range_seq.foreach(println)
-//    val rpt = new RptDriver(data_in, data_out, mode, freq, range_seq, prefix)
-//    rpt.init
+    val rpt = new RptDriver(data_in, data_out, mode, freq, range, hasRange, prefix)
+    rpt.init
   }
 
 }

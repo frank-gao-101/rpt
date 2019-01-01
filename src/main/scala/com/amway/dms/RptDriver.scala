@@ -5,101 +5,149 @@ import org.apache.spark.sql.functions._
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import org.apache.log4j.{Level, Logger}
+import com.amway.dms.{Constant => C, Utils => U}
 
-class RptDriver(data_in: String, data_out: String, mode: String, freq: String, range_seq: Seq[String], prefix: String) {
+/*
+   step 1: add column month and/or quarter
+   step 2: filter based on the report type to be generated.
+   step 3: aggregation
+ */
+class RptDriver(data_in: String, data_out: String,
+                mode: Option[String],
+                freq: Option[String],
+                range_seq: Seq[(String, String)],
+                hasRange: Boolean,
+                prefix: Option[String]) {
+
+  val prefix_s = prefix.get
+
   @transient lazy val logger = Logger.getLogger(getClass.getName)
 
-  val query_type = freq
-
   def init() = {
-    val startTime = LocalDateTime.now().toString
+    val spark = SparkSession.builder.appName("dms-reports")
+//      .config("spark.master", "local")
+        .getOrCreate()
+
+    spark.sparkContext.setLogLevel("INFO")
+    Logger.getLogger("org").setLevel(Level.OFF)
+    Logger.getLogger("akka").setLevel(Level.OFF)
+
+    val startTime = Utils.getCurrDateTime()
     logger.info(s"=== dms report processing starts at $startTime")
 
-    val spark = SparkSession.builder.appName("Ora_to_Maprfs")
-      .config("spark.master", "local").getOrCreate()
     val ora_df = spark.read.format("csv")
       .option("header", "true")
       .option("inferSchema", "true")
       .load(data_in)
 
-    process(ora_df)
-    spark.stop()
-    val endTime = LocalDateTime.now().toString
-    logger.info(s"=== dms report processing ended at $endTime")
-
-  }
-
-  def process(df: DataFrame) = {
-    logger.info(s"=== processing ${query_type}ly reports ...")
-    val df1 = df.withColumn("TRX_DT", regexp_replace(col("TRX_DT"), "(\\s.+$)", ""))
-//    val dfm = if (freq == Constant.MM) df1.withColumn(query_type, month(to_date(col("TRX_DT"), "M/d/y")))
-//    else df1.withColumn(query_type, quarter(to_date(col("TRX_DT"), "M/d/y")))
-
-
-    val dfm = if (freq == Constant.MM)
-         df1.withColumn(query_type,      // for montly report, get year and month directly from trx_dt column
-           concat(
-             regexp_extract(col("trx_dt"), "(\\d+)/\\d+/(\\d{4})", 2),
-             lit("M"),
-             lpad(
-               regexp_extract(col("trx_dt"), "(\\d+)/\\d+/(\\d{4})", 1),
-               2,"0"
-             )
-           )
-         )  else
-      df1.withColumn(query_type,       // for quarterly reports, pull quarter from trx_dt.
-        concat(
-          regexp_extract(col("TRX_DT"), "(\\d+)/\\d+/(\\d{4})", 2),
-          lit("Q"),
-          quarter(to_date(col("TRX_DT"), "M/d/y"))
-        )
-      )
-    val dfma = dfm.na.fill(0, Seq(query_type))
-    // at this point, we should have column "month" like 2018M09 or column "quarter" like 2018Q3, ready for aggregation.
-
-    val (last_m, last_q) = Utils.mq
-    val morq = if (query_type == Constant.MM) last_m else last_q
-    val query_filter = mode match {
-      case Constant.LAST =>
-            query_type + " == '" + morq + "'"
-      case Constant.ALL =>
-            query_type + " <= '" + morq + "'"
+    if (hasRange)
+      processRange(ora_df, range_seq)
+    else {
+      val freq_s = freq.get
+      val mode_s = mode.get
+      if (mode_s == C.ALL)
+        process_nonRange_mode_all(ora_df, mode_s, freq_s)
+      else
+      processNonRange(ora_df, mode_s, freq_s)
     }
 
-    val dfmb = aggByQueryType(dfma.filter(query_filter).drop(query_type))
-    PreSink(dfmb, morq)
-    // at this point, prev/all months or prev/all quarters data has been aggregated.
-
-
-//    val freq_list = dfmb.select(query_type).distinct().rdd.map(r => r(0).toString).collect()
-
-//    val range_s_seq = range_seq.map(_.toString)
-//    val rpt_not_avail = range_s_seq.toSet.diff(freq_list.toSet).toSeq
-//    val rpt_avail = range_s_seq.toSet.intersect(freq_list.toSet).toSeq
-//
-//    rpt_not_avail.foreach(m => logger.info(s"=== Report $query_type $m is not available." ))
-//    rpt_avail.foreach(filterByFreq(dfma, _))
+    spark.stop()
+    val endTime = Utils.getCurrDateTime()
+    val timeDiff = Utils.getTimeDiff(startTime, endTime)
+    logger.info(s"=== dms report processing ends at ${endTime}")
+    logger.info(s"=== Duration: ${timeDiff}.")
   }
 
-  def PreSink(df: DataFrame, mq: String): Unit = {
-    logger.info(s"=== Report for $query_type $mq is being generated ...")
-    val rpt_prefix = prefix + "_" + mode + "_" + query_type.toUpperCase() + "-" + mq
+  def processRange(df: DataFrame, range: U.PairSeq): Unit = {
+    val dfm = proc_step1(df, "Range")
+    range.foreach(process_Range_Each(dfm, _))
+  }
+
+  def process_Range_Each(df: DataFrame, ele: (String, String)): Unit = {
+      val delim = ele._1.slice(4,5)
+      val morq = if (ele._1 == ele._2) ele._1 else ele._1 + C.RANGE_DOTS + ele._2
+      val freq = if (delim == C.M) C.MM else C.QQ
+      val query_filter = (ele._1 == ele._2) match {
+        case true => freq + " == '" + ele._1 + "'"
+        case false => freq + " >= '" + ele._1 + "' AND " + freq + " <= '" + ele._2 + "'"
+      }
+
+      val dfmb = proc_step3(proc_step2(df, query_filter, freq))
+      PreSink(dfmb, morq, "Range", freq)
+  }
+
+  def process_nonRange_mode_all(df: DataFrame, mode: String, freq: String): Unit = {
+      val dfm = proc_step1(df, freq)
+      val freq_list = dfm.select(freq).distinct().rdd.map(r => r(0).toString).collect()
+      freq_list.foreach(filterByEachFreq(dfm, mode, freq, _))
+  }
+
+  def filterByEachFreq(df: DataFrame, mode:String, freq: String, each_freq:String): Unit = {
+      val query_filter = freq + " == '" + each_freq + "'"
+      val df_each_freq = proc_step3(df.filter(query_filter).drop(freq))
+
+      PreSink(df_each_freq, each_freq, mode, freq)
+  }
+
+  def processNonRange(df: DataFrame, mode: String, freq: String): Unit = {
+    logger.info(s"=== Processing ${freq}ly reports ...")
+
+    val df_step1 = proc_step1(df, freq)
+    val (last_m, last_q) = Utils.mq
+    val morq = if (freq == C.MM) last_m else last_q
+    val query_filter = mode match {
+      case C.LAST =>
+        freq + " == '" + morq + "'"
+      case C.UPTO | C.ALL =>
+        freq + " <= '" + morq + "'"
+    }
+    val df_step2 = proc_step2(df_step1, query_filter, freq)
+
+    val dfmb = proc_step3(df_step2)
+    PreSink(dfmb, morq, mode, freq)
+  }
+
+  def proc_step1(df: DataFrame, freq: String): DataFrame = {
+    val df1 = df.withColumn("TRX_DT", regexp_replace(col("TRX_DT"), "(\\s.+$)", ""))
+    val dfm = if (hasRange) {
+        addColumnQuarter(addColumnMonth(df1, C.MM), C.QQ)
+    } else freq match {
+      case C.MM => addColumnMonth(df1, freq)
+      case C.QQ => addColumnQuarter(df1, freq)
+    }
+    // at this point, we should have column "month" like 2018M09 or column "quarter" like 2018Q3, ready for aggregation.
+    dfm.na.fill(0, Seq(freq)).cache()
+  }
+
+  def proc_step2(df: DataFrame, query_filter: String, freq: String): DataFrame = {
+    val dff = df.filter(query_filter)
+//    if (hasRange)
+//      dff.drop(C.M).drop(C.Q)
+//    else
+//      dff.drop(freq)
+    dff
+  }
+
+  def proc_step3(df: DataFrame): DataFrame = {
+    df
+      .groupBy("TRX_ISO_CNTRY_CD", "DIST_ID", "BAL_TYPE_ID")
+      .agg(expr("sum(bal_amt) as TOTAL"))
+      .withColumn("TOTAL", regexp_replace(format_number(col("TOTAL"), 2), ",", ""))
+      .orderBy("TRX_ISO_CNTRY_CD", "BAL_TYPE_ID", "DIST_ID", "TOTAL")
+    //    dfma.show()
+  }
+
+
+  def PreSink(df: DataFrame, mq: String, mode: String, freq:String): Unit = {
+    logger.info(s"=== Report for $freq $mq is being generated ...")
+    val rpt_prefix = prefix_s + "_" + mode + "_" + freq.toUpperCase() + "-" + mq
     writeToCsv(df, rpt_prefix)
-  }
-
-
-  def filterByFreq(df: DataFrame, mq: String): Unit = {
-    logger.info(s"=== Report for $query_type $mq is being generated ...")
-    val m_df = df.filter(query_type + " == " + mq).drop(query_type)
-    val rpt_prefix = prefix + "_" + mode + "_" + query_type.toUpperCase() +
-                    "-" + String.format("%2s", mq).replace(' ', '0')
-    writeToCsv(m_df, rpt_prefix)
   }
 
   def writeToCsv(df: DataFrame, prefix: String) = {
     val fn = data_out + "/" + prefix + "_" +
       LocalDateTime.now().format(DateTimeFormatter.ofPattern("MM.dd.yyyy-HHmmss.SSS"))
-    logger.info(s"=== report $fn is generated.")
+    logger.info(s"=== Report $fn has been generated.")
     df
       .repartition(1)
       .write.format("csv")
@@ -109,13 +157,26 @@ class RptDriver(data_in: String, data_out: String, mode: String, freq: String, r
       .save(fn)
   }
 
-  def aggByQueryType(df: DataFrame): DataFrame = {
-    df
-      .groupBy("TRX_ISO_CNTRY_CD", "DIST_ID", "BAL_TYPE_ID")
-      .agg(expr("sum(bal_amt) as TOTAL"))
-      .withColumn("TOTAL", regexp_replace(format_number(col("TOTAL"), 2), ",", ""))
-      .orderBy("TRX_ISO_CNTRY_CD", "BAL_TYPE_ID", "DIST_ID", "TOTAL")
-    //    dfma.show()
+  def addColumnMonth(df: DataFrame, column_name: String): DataFrame = {
+    df.withColumn(column_name, // for montly report, get year and month directly from trx_dt column
+      concat(
+        regexp_extract(col("trx_dt"), "(\\d+)/\\d+/(\\d{4})", 2),
+        lit(C.M),
+        lpad(
+          regexp_extract(col("trx_dt"), "(\\d+)/\\d+/(\\d{4})", 1),
+          2, "0"
+        )
+      )
+    )
   }
 
+  def addColumnQuarter(df: DataFrame, column_name: String): DataFrame = {
+    df.withColumn(column_name, // for quarterly reports, pull quarter from trx_dt.
+      concat(
+        regexp_extract(col("TRX_DT"), "(\\d+)/\\d+/(\\d{4})", 2),
+        lit(C.Q),
+        quarter(to_date(col("TRX_DT"), "M/d/y"))
+      )
+    )
+  }
 }
