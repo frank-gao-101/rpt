@@ -1,8 +1,8 @@
 package com.amway.dms
 
 import java.time.temporal.ChronoUnit.{MINUTES, SECONDS}
-import java.time.LocalDateTime
-import java.util.Calendar
+import java.time.temporal.IsoFields
+import java.time.{LocalDateTime, MonthDay, Year, YearMonth}
 
 import com.amway.dms.{Constant => C}
 
@@ -159,13 +159,12 @@ object Utils {
 
   // return a tuple like (2018M09, 2018Q3)
   def mq(): (String, String) = {
-    val cal_month = Calendar.getInstance().get(Calendar.MONTH)
-    val cal_year = Calendar.getInstance().get(Calendar.YEAR)
+    val curr_ym = YearMonth.now
+    val prev_ym = curr_ym.minusMonths(1)
+    val last_month = prev_ym.toString.replace("-", C.M)
 
-    val last_month = if (cal_month == 0) (cal_year - 1).toString + "M12" else cal_year.toString + "M" + f"$cal_month%02d"
-    val curr_month = cal_month + 1
-    val curr_q = if (curr_month % 3 == 0) curr_month / 3 else curr_month / 3 + 1
-    val last_q = if (curr_q == 1) (cal_year - 1).toString + "Q4" else cal_year.toString + "Q" + (curr_q - 1).toString
+    val prev3_ym = curr_ym.minusMonths(3)
+    val last_q = prev3_ym.getYear.toString + C.Q + prev3_ym.get(IsoFields.QUARTER_OF_YEAR).toString
 
     (last_month, last_q)
   }
