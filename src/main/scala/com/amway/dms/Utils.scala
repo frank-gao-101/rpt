@@ -59,14 +59,14 @@ object Utils {
       sys.exit(1)
     }
 
-    if (!opt_map.contains('range) || (opt_map.contains('mode) &&
+    if (!opt_map.contains('range) && !opt_map.contains('mode) || (opt_map.contains('mode) &&
       !Seq(C.LAST, C.ALL, C.UPTO).contains(opt_map('mode).toString.toLowerCase))) {
       println(C.ERR_INVALID_MODE);
       println(usage)
       sys.exit(1)
     }
 
-    if (!opt_map.contains('range) || (opt_map.contains('freq) &&
+    if (!opt_map.contains('range) && !opt_map.contains('freq)  || (opt_map.contains('freq) &&
       !Seq(C.MM, C.QQ).contains(opt_map('freq).toString.toLowerCase))) {
       println(C.ERR_INVALID_FREQ);
       println(usage)
@@ -166,6 +166,7 @@ object Utils {
     val prev3_ym = curr_ym.minusMonths(3)
     val last_q = prev3_ym.getYear.toString + C.Q + prev3_ym.get(IsoFields.QUARTER_OF_YEAR).toString
 
+    println(s"=== last_month: $last_month , last_q: $last_q")
     (last_month, last_q)
   }
 
