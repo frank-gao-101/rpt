@@ -58,12 +58,12 @@ class RptDriver(data_in: String, data_out: String,
     logger.info(s"=== Duration: ${timeDiff}.")
   }
 
-  def processRange(df: DataFrame, range: U.PairSeq): Unit = {
+  def processRange(df: DataFrame, range: U.PairSeq) {
     val dfm = proc_step1(df, "Range")
     range.foreach(process_Range_Each(dfm, _))
   }
 
-  def process_Range_Each(df: DataFrame, ele: (String, String)): Unit = {
+  def process_Range_Each(df: DataFrame, ele: (String, String)) {
       val delim = ele._1.slice(4,5)
       val morq = if (ele._1 == ele._2) ele._1 else ele._1 + C.RANGE_DOTS + ele._2
       val freq = if (delim == C.M) C.MM else C.QQ
@@ -76,20 +76,20 @@ class RptDriver(data_in: String, data_out: String,
       PreSink(dfmb, morq, "Range", freq)
   }
 
-  def process_nonRange_mode_all(df: DataFrame, mode: String, freq: String): Unit = {
+  def process_nonRange_mode_all(df: DataFrame, mode: String, freq: String) {
       val dfm = proc_step1(df, freq)
       val freq_list = dfm.select(freq).distinct().rdd.map(r => r(0).toString).collect()
       freq_list.foreach(filterByEachFreq(dfm, mode, freq, _))
   }
 
-  def filterByEachFreq(df: DataFrame, mode:String, freq: String, each_freq:String): Unit = {
+  def filterByEachFreq(df: DataFrame, mode:String, freq: String, each_freq:String) {
       val query_filter = freq + " == '" + each_freq + "'"
       val df_each_freq = proc_step3(df.filter(query_filter).drop(freq))
 
       PreSink(df_each_freq, each_freq, mode, freq)
   }
 
-  def processNonRange(df: DataFrame, mode: String, freq: String): Unit = {
+  def processNonRange(df: DataFrame, mode: String, freq: String){
     logger.info(s"=== Processing ${freq}ly reports ...")
 
     val df_step1 = proc_step1(df, freq)
@@ -107,28 +107,24 @@ class RptDriver(data_in: String, data_out: String,
     PreSink(dfmb, morq, mode, freq)
   }
 
-  def proc_step1(df: DataFrame, freq: String): DataFrame = {
+  def proc_step1(df: DataFrame, freq: String) = {
+
     val df1 = df.withColumn("TRX_DT", regexp_replace(col("TRX_DT"), "(\\s.+$)", ""))
     val dfm = if (hasRange) {
-        addColumnQuarter(addColumnMonth(df1, C.MM), C.QQ)
+      df1.addColumnQuarter.addColumnMonth
     } else freq match {
-      case C.MM => addColumnMonth(df1, freq)
-      case C.QQ => addColumnQuarter(df1, freq)
+      case C.MM => df1.addColumnMonth
+      case C.QQ => df1.addColumnQuarter
     }
     // at this point, we should have column "month" like 2018M09 or column "quarter" like 2018Q3, ready for aggregation.
     dfm.na.fill(0, Seq(freq)).cache()
   }
 
-  def proc_step2(df: DataFrame, query_filter: String, freq: String): DataFrame = {
-    val dff = df.filter(query_filter)
-//    if (hasRange)
-//      dff.drop(C.M).drop(C.Q)
-//    else
-//      dff.drop(freq)
-    dff
+  def proc_step2(df: DataFrame, query_filter: String, freq: String) = {
+      df.filter(query_filter)
   }
 
-  def proc_step3(df: DataFrame): DataFrame = {
+  def proc_step3(df: DataFrame) = {
     df
       .groupBy("TRX_ISO_CNTRY_CD", "DIST_ID", "BAL_TYPE_ID")
       .agg(expr("sum(bal_amt) as TOTAL"))
@@ -138,7 +134,7 @@ class RptDriver(data_in: String, data_out: String,
   }
 
 
-  def PreSink(df: DataFrame, mq: String, mode: String, freq:String): Unit = {
+  def PreSink(df: DataFrame, mq: String, mode: String, freq:String) = {
     logger.info(s"=== Report for $freq $mq is being generated ...")
     val rpt_prefix = prefix_s + "_" + mode + "_" + freq.toUpperCase() + "-" + mq
     writeToCsv(df, rpt_prefix)
@@ -157,26 +153,29 @@ class RptDriver(data_in: String, data_out: String,
       .save(fn)
   }
 
-  def addColumnMonth(df: DataFrame, column_name: String): DataFrame = {
-    df.withColumn(column_name, // for montly report, get year and month directly from trx_dt column
-      concat(
-        regexp_extract(col("trx_dt"), "(\\d+)/\\d+/(\\d{4})", 2),
-        lit(C.M),
-        lpad(
-          regexp_extract(col("trx_dt"), "(\\d+)/\\d+/(\\d{4})", 1),
-          2, "0"
+  implicit class DFU(df: DataFrame) {
+    def addColumnMonth() = {
+      df.withColumn(C.MM, // for montly report, get year and month directly from trx_dt column
+        concat(
+          regexp_extract(col("trx_dt"), "(\\d+)/\\d+/(\\d{4})", 2),
+          lit(C.M),
+          lpad(
+            regexp_extract(col("trx_dt"), "(\\d+)/\\d+/(\\d{4})", 1),
+            2, "0"
+          )
         )
       )
-    )
+    }
+
+    def addColumnQuarter() = {
+      df.withColumn(C.QQ, // for quarterly reports, pull quarter from trx_dt.
+        concat(
+          regexp_extract(col("TRX_DT"), "(\\d+)/\\d+/(\\d{4})", 2),
+          lit(C.Q),
+          quarter(to_date(col("TRX_DT"), "M/d/y"))
+        )
+      )
+    }
   }
 
-  def addColumnQuarter(df: DataFrame, column_name: String): DataFrame = {
-    df.withColumn(column_name, // for quarterly reports, pull quarter from trx_dt.
-      concat(
-        regexp_extract(col("TRX_DT"), "(\\d+)/\\d+/(\\d{4})", 2),
-        lit(C.Q),
-        quarter(to_date(col("TRX_DT"), "M/d/y"))
-      )
-    )
-  }
 }

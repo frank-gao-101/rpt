@@ -1,8 +1,9 @@
 package com.amway.dms
 
-import java.time.temporal.ChronoUnit.{MINUTES,SECONDS}
+import java.time.temporal.ChronoUnit.{MINUTES, SECONDS}
 import java.time.LocalDateTime
 import java.util.Calendar
+
 import com.amway.dms.{Constant => C}
 
 object Utils {
@@ -59,15 +60,15 @@ object Utils {
     }
 
     if (!opt_map.contains('range) || (opt_map.contains('mode) &&
-      !Seq(C.LAST, Constant.ALL, Constant.UPTO).contains(opt_map('mode).toString.toLowerCase))) {
-      println(Constant.ERR_INVALID_MODE);
+      !Seq(C.LAST, C.ALL, C.UPTO).contains(opt_map('mode).toString.toLowerCase))) {
+      println(C.ERR_INVALID_MODE);
       println(usage)
       sys.exit(1)
     }
 
     if (!opt_map.contains('range) || (opt_map.contains('freq) &&
-      !Seq(Constant.MM, Constant.QQ).contains(opt_map('freq).toString.toLowerCase))) {
-      println(Constant.ERR_INVALID_FREQ);
+      !Seq(C.MM, C.QQ).contains(opt_map('freq).toString.toLowerCase))) {
+      println(C.ERR_INVALID_FREQ);
       println(usage)
       sys.exit(1)
     }
@@ -78,7 +79,7 @@ object Utils {
       opt_map.get('freq),
       rangexpr(opt_map.get('range)),
       opt_map.contains('range),
-      opt_map.get(Symbol("report-gen-prefix")).orElse(Some(Constant.PREFIX))
+      opt_map.get(Symbol("report-gen-prefix")).orElse(Some(C.PREFIX))
 
     )
   }
@@ -137,7 +138,7 @@ object Utils {
     val seq_tuple = gen(y, m, diff, init_seq)
 
 //    println(s"after size=${seq_tuple}.size")
-    seq_tuple.toList.map(m => m._1.toString + delim + (if (delim == Constant.M) f"${m._2}%02d" else m._2))
+    seq_tuple.toList.map(m => m._1.toString + delim + (if (delim == C.M) f"${m._2}%02d" else m._2))
       .map(m => (m, m))
   }
 
@@ -150,8 +151,8 @@ object Utils {
   def validRange(unit: String, num_str: String): Boolean = {
     val num = num_str.toInt
     unit match {
-      case Constant.M if num > 0 && num < 13 => true
-      case Constant.Q if num > 0 && num < 5 => true
+      case C.M if num > 0 && num < 13 => true
+      case C.Q if num > 0 && num < 5 => true
       case _ => false
     }
   }
